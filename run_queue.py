@@ -1002,6 +1002,288 @@ class CommandProcessor:
                     "raw_bytes": list(tlv_list)
                 }
 
+            # ======================================================================
+            # FN Query Data Commands (Запрос информации из ФН)
+            # ======================================================================
+            elif command == 'query_last_receipt':
+                # Запрос информации о последнем чеке из ФН
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_LAST_RECEIPT)
+                self._check_result(self.fptr.fnQueryData(), "запроса информации о последнем чеке")
+
+                # Получаем данные о последнем чеке
+                document_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_DOCUMENT_NUMBER)
+                receipt_sum = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_RECEIPT_SUM)
+                fiscal_sign = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_FISCAL_SIGN)
+                date_time = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_DATE_TIME)
+                receipt_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_RECEIPT_TYPE)
+
+                # Определяем название типа чека
+                receipt_type_names = {
+                    IFptr.LIBFPTR_RT_SELL: "Чек прихода",
+                    IFptr.LIBFPTR_RT_SELL_RETURN: "Чек возврата прихода",
+                    IFptr.LIBFPTR_RT_SELL_CORRECTION: "Чек коррекции прихода",
+                    IFptr.LIBFPTR_RT_BUY: "Чек расхода",
+                    IFptr.LIBFPTR_RT_BUY_RETURN: "Чек возврата расхода",
+                    IFptr.LIBFPTR_RT_BUY_CORRECTION: "Чек коррекции расхода",
+                }
+                receipt_type_name = receipt_type_names.get(receipt_type, f"Неизвестный тип ({receipt_type})")
+
+                response['success'] = True
+                response['message'] = f"Информация о последнем чеке (№{document_number}) успешно получена"
+                response['data'] = {
+                    "document_number": document_number,
+                    "receipt_sum": receipt_sum,
+                    "fiscal_sign": fiscal_sign,
+                    "date_time": date_time.strftime("%Y-%m-%d %H:%M:%S") if date_time else None,
+                    "receipt_type": receipt_type,
+                    "receipt_type_name": receipt_type_name
+                }
+
+            elif command == 'query_registration_info':
+                # Запрос регистрационных данных ККТ
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_REG_INFO)
+                self._check_result(self.fptr.fnQueryData(), "запроса регистрационных данных")
+
+                # Получаем все регистрационные данные
+                data = {}
+
+                # Строковые параметры
+                data['fns_url'] = self.fptr.getParamString(1060)  # Адрес сайта ФНС
+                data['organization_address'] = self.fptr.getParamString(1009)  # Адрес расчетов
+                data['organization_vatin'] = self.fptr.getParamString(1018)  # ИНН пользователя
+                data['organization_name'] = self.fptr.getParamString(1048)  # Наименование пользователя
+                data['organization_email'] = self.fptr.getParamString(1117)  # Email отправителя чека
+                data['payments_address'] = self.fptr.getParamString(1187)  # Место расчетов
+                data['registration_number'] = self.fptr.getParamString(1037)  # Регистрационный номер ККТ
+                data['machine_number'] = self.fptr.getParamString(1036)  # Номер автомата
+                data['ofd_vatin'] = self.fptr.getParamString(1017)  # ИНН ОФД
+                data['ofd_name'] = self.fptr.getParamString(1046)  # Название ОФД
+
+                # Числовые параметры
+                taxation_types = self.fptr.getParamInt(1062)  # Системы налогообложения (битовое поле)
+                agent_sign = self.fptr.getParamInt(1057)  # Признак агента (битовое поле)
+                ffd_version = self.fptr.getParamInt(1209)  # Номер версии ФФД
+
+                # Преобразуем системы налогообложения в список
+                taxation_systems = []
+                if taxation_types & IFptr.LIBFPTR_TT_OSN:
+                    taxation_systems.append("Общая")
+                if taxation_types & IFptr.LIBFPTR_TT_USN_INCOME:
+                    taxation_systems.append("УСН доход")
+                if taxation_types & IFptr.LIBFPTR_TT_USN_INCOME_OUTCOME:
+                    taxation_systems.append("УСН доход минус расход")
+                if taxation_types & IFptr.LIBFPTR_TT_ESN:
+                    taxation_systems.append("ЕСХН")
+                if taxation_types & IFptr.LIBFPTR_TT_PATENT:
+                    taxation_systems.append("Патентная")
+                data['taxation_systems'] = taxation_systems
+
+                # Преобразуем признак агента
+                agent_types = []
+                if agent_sign == 0:
+                    agent_types.append("Признак агента отсутствует")
+                else:
+                    if agent_sign & IFptr.LIBFPTR_AT_BANK_PAYING_AGENT:
+                        agent_types.append("Банковский платежный агент")
+                    if agent_sign & IFptr.LIBFPTR_AT_BANK_PAYING_SUBAGENT:
+                        agent_types.append("Банковский платежный субагент")
+                    if agent_sign & IFptr.LIBFPTR_AT_PAYING_AGENT:
+                        agent_types.append("Платежный агент")
+                    if agent_sign & IFptr.LIBFPTR_AT_PAYING_SUBAGENT:
+                        agent_types.append("Платежный субагент")
+                    if agent_sign & IFptr.LIBFPTR_AT_ATTORNEY:
+                        agent_types.append("Поверенный")
+                    if agent_sign & IFptr.LIBFPTR_AT_COMMISSION_AGENT:
+                        agent_types.append("Комиссионер")
+                    if agent_sign & IFptr.LIBFPTR_AT_ANOTHER:
+                        agent_types.append("Другой тип агента")
+                data['agent_types'] = agent_types
+
+                # Преобразуем версию ФФД
+                ffd_versions = {
+                    IFptr.LIBFPTR_FFD_UNKNOWN: "Неизвестная",
+                    IFptr.LIBFPTR_FFD_1_05: "ФФД 1.05",
+                    IFptr.LIBFPTR_FFD_1_1: "ФФД 1.1",
+                    IFptr.LIBFPTR_FFD_1_2: "ФФД 1.2",
+                }
+                data['ffd_version'] = ffd_versions.get(ffd_version, f"Неизвестная ({ffd_version})")
+                data['ffd_version_code'] = ffd_version
+
+                # Булевы параметры
+                data['auto_mode_sign'] = self.fptr.getParamBool(1001)  # Признак автоматического режима
+                data['offline_mode_sign'] = self.fptr.getParamBool(1002)  # Признак автономного режима
+                data['encryption_sign'] = self.fptr.getParamBool(1056)  # Признак шифрования
+                data['internet_sign'] = self.fptr.getParamBool(1108)  # Признак ККТ для расчетов в сети Интернет
+                data['service_sign'] = self.fptr.getParamBool(1109)  # Признак расчетов за услуги
+                data['bso_sign'] = self.fptr.getParamBool(1110)  # Признак АС БСО
+
+                # Дополнительные признаки (могут быть недоступны на старых ФФД)
+                try:
+                    data['lottery_sign'] = self.fptr.getParamBool(1126)  # Признак проведения лотерей
+                    data['gambling_sign'] = self.fptr.getParamBool(1193)  # Признак проведения азартных игр
+                    data['excise_sign'] = self.fptr.getParamBool(1207)  # Признак подакцизного товара
+                    data['machine_installation_sign'] = self.fptr.getParamBool(1221)  # Признак установки принтера в автомате
+                except:
+                    pass  # Эти поля могут отсутствовать
+
+                # Дополнительные параметры через именованные константы
+                try:
+                    data['trade_marked_products'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TRADE_MARKED_PRODUCTS)
+                    data['insurance_activity'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_INSURANCE_ACTIVITY)
+                    data['pawn_shop_activity'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_PAWN_SHOP_ACTIVITY)
+                    data['vending'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_VENDING)
+                    data['catering'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_CATERING)
+                    data['wholesale'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_WHOLESALE)
+                except:
+                    pass  # Эти поля могут отсутствовать
+
+                response['success'] = True
+                response['message'] = "Регистрационные данные ККТ успешно получены"
+                response['data'] = data
+
+            elif command == 'query_fn_info':
+                # Запрос информации и статуса ФН
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_FN_INFO)
+                self._check_result(self.fptr.fnQueryData(), "запроса информации о ФН")
+
+                data = {
+                    'fn_serial': self.fptr.getParamString(IFptr.LIBFPTR_PARAM_SERIAL_NUMBER),
+                    'fn_version': self.fptr.getParamString(IFptr.LIBFPTR_PARAM_FN_VERSION),
+                }
+
+                # Исполнение ФН (только для ФН-М)
+                try:
+                    data['fn_execution'] = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_FN_EXECUTION)
+                except:
+                    pass
+
+                # Тип ФН
+                fn_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FN_TYPE)
+                fn_types = {
+                    IFptr.LIBFPTR_FNT_UNKNOWN: "Неизвестный",
+                    IFptr.LIBFPTR_FNT_DEBUG: "Отладочная версия",
+                    IFptr.LIBFPTR_FNT_RELEASE: "Боевая версия"
+                }
+                data['fn_type'] = fn_types.get(fn_type, f"Неизвестный ({fn_type})")
+                data['fn_type_code'] = fn_type
+
+                # Состояние ФН
+                fn_state = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FN_STATE)
+                fn_states = {
+                    IFptr.LIBFPTR_FNS_INITIAL: "Настройка ФН",
+                    IFptr.LIBFPTR_FNS_CONFIGURED: "Готовность к активации",
+                    IFptr.LIBFPTR_FNS_FISCAL_MODE: "Фискальный режим",
+                    IFptr.LIBFPTR_FNS_POSTFISCAL_MODE: "Постфискальный режим",
+                    IFptr.LIBFPTR_FNS_ACCESS_ARCHIVE: "Доступ к архиву"
+                }
+                data['fn_state'] = fn_states.get(fn_state, f"Неизвестное ({fn_state})")
+                data['fn_state_code'] = fn_state
+
+                # Флаги и статусы
+                data['fn_flags'] = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FN_FLAGS)
+                data['fn_need_replacement'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_NEED_REPLACEMENT)
+                data['fn_resource_exhausted'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_RESOURCE_EXHAUSTED)
+                data['fn_memory_overflow'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_MEMORY_OVERFLOW)
+                data['fn_ofd_timeout'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_OFD_TIMEOUT)
+                data['fn_critical_error'] = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_CRITICAL_ERROR)
+
+                # URI сервера ОКП
+                fn_contains_uri = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_FN_CONTAINS_KEYS_UPDATER_SERVER_URI)
+                data['fn_contains_keys_updater_server_uri'] = fn_contains_uri
+                if fn_contains_uri:
+                    data['fn_keys_updater_server_uri'] = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_FN_KEYS_UPDATER_SERVER_URI)
+
+                response['success'] = True
+                response['message'] = "Информация о ФН успешно получена"
+                response['data'] = data
+
+            elif command == 'query_ofd_exchange_status':
+                # Запрос статуса информационного обмена с ОФД
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_OFD_EXCHANGE_STATUS)
+                self._check_result(self.fptr.fnQueryData(), "запроса статуса обмена с ОФД")
+
+                exchange_status = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_OFD_EXCHANGE_STATUS)
+
+                # Расшифровываем битовое поле статуса
+                status_flags = []
+                if exchange_status & (1 << 0):
+                    status_flags.append("Транспортное соединение установлено")
+                if exchange_status & (1 << 1):
+                    status_flags.append("Есть сообщение для передачи в ОФД")
+                if exchange_status & (1 << 2):
+                    status_flags.append("Ожидание ответного сообщения (квитанции) от ОФД")
+                if exchange_status & (1 << 3):
+                    status_flags.append("Есть команда от ОФД")
+                if exchange_status & (1 << 4):
+                    status_flags.append("Изменились настройки соединения с ОФД")
+                if exchange_status & (1 << 5):
+                    status_flags.append("Ожидание ответа на команду от ОФД")
+
+                date_time = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_DATE_TIME)
+                okp_time = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_LAST_SUCCESSFUL_OKP)
+
+                data = {
+                    'exchange_status_code': exchange_status,
+                    'exchange_status_flags': status_flags,
+                    'unsent_documents_count': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_DOCUMENTS_COUNT),
+                    'first_unsent_document_number': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_DOCUMENT_NUMBER),
+                    'ofd_message_read': self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_OFD_MESSAGE_READ),
+                    'first_unsent_date_time': date_time.strftime("%Y-%m-%d %H:%M:%S") if date_time else None,
+                    'last_successful_okp_time': okp_time.strftime("%Y-%m-%d %H:%M:%S") if okp_time else None,
+                }
+
+                response['success'] = True
+                response['message'] = "Статус обмена с ОФД успешно получен"
+                response['data'] = data
+
+            elif command == 'query_shift_info':
+                # Запрос информации о текущей смене в ФН
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_SHIFT)
+                self._check_result(self.fptr.fnQueryData(), "запроса информации о смене")
+
+                data = {
+                    'receipts_count': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_RECEIPT_NUMBER),
+                    'shift_number': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER),
+                }
+
+                response['success'] = True
+                response['message'] = "Информация о смене успешно получена"
+                response['data'] = data
+
+            elif command == 'query_last_document':
+                # Запрос информации о последнем фискальном документе
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_LAST_DOCUMENT)
+                self._check_result(self.fptr.fnQueryData(), "запроса информации о последнем документе")
+
+                date_time = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_DATE_TIME)
+
+                data = {
+                    'document_number': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_DOCUMENT_NUMBER),
+                    'fiscal_sign': self.fptr.getParamString(IFptr.LIBFPTR_PARAM_FISCAL_SIGN),
+                    'date_time': date_time.strftime("%Y-%m-%d %H:%M:%S") if date_time else None,
+                }
+
+                response['success'] = True
+                response['message'] = "Информация о последнем документе успешно получена"
+                response['data'] = data
+
+            elif command == 'query_fn_validity':
+                # Запрос срока действия ФН
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_FN_DATA_TYPE, IFptr.LIBFPTR_FNDT_VALIDITY)
+                self._check_result(self.fptr.fnQueryData(), "запроса срока действия ФН")
+
+                date_time = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_DATE_TIME)
+
+                data = {
+                    'validity_date': date_time.strftime("%Y-%m-%d") if date_time else None,
+                    'registrations_count': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_REGISTRATIONS_COUNT),
+                    'registrations_remain': self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_REGISTRATIONS_REMAIN),
+                }
+
+                response['success'] = True
+                response['message'] = "Срок действия ФН успешно получен"
+                response['data'] = data
+
             else:
                 response['message'] = f"Неизвестная команда: {command}"
 
