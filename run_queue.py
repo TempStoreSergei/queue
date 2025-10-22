@@ -305,7 +305,7 @@ class CommandProcessor:
                 response['success'] = True
                 response['message'] = f"Чек типа {kwargs['receipt_type']} успешно открыт"
 
-            elif command == 'receipt_add_item':
+            elif command == 'registration':
                 for key, value in kwargs.items():
                     if key == 'name': self.fptr.setParam(IFptr.LIBFPTR_PARAM_COMMODITY_NAME, value)
                     elif key == 'price': self.fptr.setParam(IFptr.LIBFPTR_PARAM_PRICE, value)
@@ -317,7 +317,7 @@ class CommandProcessor:
                 response['success'] = True
                 response['message'] = f"Позиция '{kwargs['name']}' добавлена"
 
-            elif command == 'receipt_add_payment':
+            elif command == 'payment':
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_TYPE, kwargs['payment_type'])
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_SUM, kwargs['sum'])
                 self._check_result(self.fptr.payment(), "регистрации оплаты")
