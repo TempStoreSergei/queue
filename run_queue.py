@@ -185,19 +185,19 @@ class CommandProcessor:
             # ======================================================================
             # Connection Commands
             # ======================================================================
-            if command == 'connection_open':
+            if command == 'open_connection':
                 if 'settings' in kwargs and kwargs['settings'] is not None:
                     self.fptr.setSettings(json.dumps(kwargs['settings']))
                 self._check_result(self.fptr.open(), "открытия соединения")
                 response['success'] = True
                 response['message'] = "Соединение с ККТ успешно установлено"
 
-            elif command == 'connection_close':
+            elif command == 'close_connection':
                 self._check_result(self.fptr.close(), "закрытия соединения")
                 response['success'] = True
                 response['message'] = "Соединение с ККТ закрыто"
 
-            elif command == 'connection_is_opened':
+            elif command == 'is_connection_opened':
                 is_opened = self.fptr.isOpened()
                 response['success'] = True
                 response['message'] = "Соединение активно" if is_opened else "Соединение не установлено"
@@ -209,7 +209,7 @@ class CommandProcessor:
             # ======================================================================
             # Shift Commands
             # ======================================================================
-            elif command == 'shift_open':
+            elif command == 'open_shift':
                 # Получение кассира с приоритетом: kwargs -> Redis -> settings
                 cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
                 self.fptr.setParam(1021, cashier_name)
@@ -226,7 +226,7 @@ class CommandProcessor:
                 response['message'] = f"Смена #{shift_number} успешно открыта"
                 response['data'] = {'shift_number': shift_number}
 
-            elif command == 'shift_close':
+            elif command == 'close_shift':
                 # Получение кассира с приоритетом: kwargs -> Redis -> settings
                 cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
                 self.fptr.setParam(1021, cashier_name)
@@ -246,7 +246,7 @@ class CommandProcessor:
                 }
                 response['message'] = "Смена успешно закрыта, Z-отчет напечатан"
 
-            elif command == 'shift_get_status':
+            elif command == 'get_shift_status':
                 # Запрос состояния смены
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_DATA_TYPE, IFptr.LIBFPTR_DT_SHIFT_STATE)
                 self._check_result(self.fptr.queryData(), "запроса состояния смены")
@@ -270,7 +270,7 @@ class CommandProcessor:
                 }
                 response['message'] = "Статус смены получен"
 
-            elif command == 'shift_print_x_report':
+            elif command == 'print_x_report':
                 # Получение кассира с приоритетом: kwargs -> Redis -> settings
                 cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
                 self.fptr.setParam(1021, cashier_name)
@@ -288,7 +288,7 @@ class CommandProcessor:
             # ======================================================================
             # Receipt Commands
             # ======================================================================
-            elif command == 'receipt_open':
+            elif command == 'open_receipt':
                 # Получение кассира с приоритетом: kwargs -> Redis -> settings
                 cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
                 self.fptr.setParam(1021, cashier_name)
@@ -324,13 +324,13 @@ class CommandProcessor:
                 response['success'] = True
                 response['message'] = f"Оплата {kwargs['sum']:.2f} добавлена"
 
-            elif command == 'receipt_close':
+            elif command == 'close_receipt':
                 self._check_result(self.fptr.closeReceipt(), "закрытия чека")
                 response['success'] = True
                 response['data'] = None
                 response['message'] = "Чек успешно закрыт и напечатан"
 
-            elif command == 'receipt_cancel':
+            elif command == 'cancel_receipt':
                 self._check_result(self.fptr.cancelReceipt(), "отмены чека")
                 response['success'] = True
                 response['message'] = "Чек отменен"
