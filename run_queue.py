@@ -708,6 +708,300 @@ class CommandProcessor:
                 response['message'] = "Конфигурация по умолчанию получена"
                 response['data'] = default_config
 
+            # ======================================================================
+            # Read Records Commands (Чтение данных из ФН и ККТ)
+            # ======================================================================
+            elif command == 'read_fn_document':
+                document_number = kwargs['document_number']
+
+                # Начинаем чтение документа из ФН
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_FN_DOCUMENT_TLVS)
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_DOCUMENT_NUMBER, document_number)
+                self._check_result(self.fptr.beginReadRecords(), "начала чтения документа из ФН")
+
+                # Получаем информацию о документе
+                document_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FN_DOCUMENT_TYPE)
+                document_size = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_COUNT)
+                records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                # Читаем все TLV-записи
+                tlv_records = []
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
+                    tag_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_NUMBER)
+                    tag_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_NAME)
+                    tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
+                    is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
+                    is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+
+                    # Читаем значение в зависимости от типа
+                    tag_value = None
+                    try:
+                        if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
+                            tag_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 3:  # FVLN (float)
+                            tag_value = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 8:  # STRING
+                            tag_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 10:  # BOOL
+                            tag_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        else:  # STLV, ARRAY, BITS, UNIX_TIME
+                            tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+                    except:
+                        tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+
+                    tlv_records.append({
+                        "tag_number": tag_number,
+                        "tag_name": tag_name,
+                        "tag_type": tag_type,
+                        "tag_value": tag_value,
+                        "is_complex": is_complex,
+                        "is_repeatable": is_repeatable
+                    })
+
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                # Завершаем чтение
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                self._check_result(self.fptr.endReadRecords(), "завершения чтения документа")
+
+                response['success'] = True
+                response['message'] = f"Документ №{document_number} успешно прочитан из ФН"
+                response['data'] = {
+                    "document_number": document_number,
+                    "document_type": document_type,
+                    "document_size": document_size,
+                    "tlv_records": tlv_records
+                }
+
+            elif command == 'read_licenses':
+                # Начинаем чтение лицензий
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_LICENSES)
+                self._check_result(self.fptr.beginReadRecords(), "начала чтения лицензий")
+
+                records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                # Читаем все лицензии
+                licenses = []
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
+                    license_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_LICENSE_NUMBER)
+                    license_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_LICENSE_NAME)
+                    date_from = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_LICENSE_VALID_FROM)
+                    date_until = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_LICENSE_VALID_UNTIL)
+
+                    licenses.append({
+                        "license_number": license_number,
+                        "license_name": license_name,
+                        "valid_from": date_from.isoformat() if isinstance(date_from, datetime.datetime) else "1970-01-01T00:00:00",
+                        "valid_until": date_until.isoformat() if isinstance(date_until, datetime.datetime) else "1970-01-01T00:00:00"
+                    })
+
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                # Завершаем чтение
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                self._check_result(self.fptr.endReadRecords(), "завершения чтения лицензий")
+
+                response['success'] = True
+                response['message'] = f"Прочитано лицензий: {len(licenses)}"
+                response['data'] = {"licenses": licenses}
+
+            elif command == 'read_registration_document':
+                registration_number = kwargs['registration_number']
+
+                # Начинаем чтение документа регистрации
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_FN_REGISTRATION_TLVS)
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_REGISTRATION_NUMBER, registration_number)
+                self._check_result(self.fptr.beginReadRecords(), "начала чтения документа регистрации")
+
+                records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                # Читаем все TLV-записи
+                tlv_records = []
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
+                    tag_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_NUMBER)
+                    tag_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_NAME)
+                    tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
+                    is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
+                    is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+
+                    # Читаем значение в зависимости от типа
+                    tag_value = None
+                    try:
+                        if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
+                            tag_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 3:  # FVLN (float)
+                            tag_value = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 8:  # STRING
+                            tag_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 10:  # BOOL
+                            tag_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        else:  # STLV, ARRAY, BITS, UNIX_TIME
+                            tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+                    except:
+                        tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+
+                    tlv_records.append({
+                        "tag_number": tag_number,
+                        "tag_name": tag_name,
+                        "tag_type": tag_type,
+                        "tag_value": tag_value,
+                        "is_complex": is_complex,
+                        "is_repeatable": is_repeatable
+                    })
+
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                # Завершаем чтение
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                self._check_result(self.fptr.endReadRecords(), "завершения чтения документа регистрации")
+
+                response['success'] = True
+                response['message'] = f"Документ регистрации №{registration_number} успешно прочитан"
+                response['data'] = {
+                    "registration_number": registration_number,
+                    "tlv_records": tlv_records
+                }
+
+            elif command == 'parse_complex_attribute':
+                tag_value_bytes = bytes(kwargs['tag_value'])
+
+                # Начинаем разбор составного реквизита
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_PARSE_COMPLEX_ATTR)
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAG_VALUE, tag_value_bytes)
+                self._check_result(self.fptr.beginReadRecords(), "начала разбора составного реквизита")
+
+                records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                # Читаем все вложенные реквизиты
+                parsed_records = []
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
+                    tag_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_NUMBER)
+                    tag_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_NAME)
+                    tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
+                    is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
+                    is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+
+                    # Читаем значение в зависимости от типа
+                    tag_value = None
+                    try:
+                        if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
+                            tag_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 3:  # FVLN (float)
+                            tag_value = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 8:  # STRING
+                            tag_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        elif tag_type == 10:  # BOOL
+                            tag_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        else:  # STLV, ARRAY, BITS, UNIX_TIME
+                            tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+                    except:
+                        tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+
+                    parsed_records.append({
+                        "tag_number": tag_number,
+                        "tag_name": tag_name,
+                        "tag_type": tag_type,
+                        "tag_value": tag_value,
+                        "is_complex": is_complex,
+                        "is_repeatable": is_repeatable
+                    })
+
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                # Завершаем разбор
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                self._check_result(self.fptr.endReadRecords(), "завершения разбора составного реквизита")
+
+                response['success'] = True
+                response['message'] = f"Составной реквизит успешно разобран, найдено элементов: {len(parsed_records)}"
+                response['data'] = {"parsed_records": parsed_records}
+
+            elif command == 'read_kkt_settings':
+                # Начинаем чтение настроек
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_SETTINGS)
+                self._check_result(self.fptr.beginReadRecords(), "начала чтения настроек ККТ")
+
+                records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                # Читаем все настройки
+                settings = []
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
+                    setting_id = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SETTING_ID)
+                    setting_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SETTING_TYPE)
+                    setting_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_SETTING_NAME)
+
+                    # Читаем значение в зависимости от типа
+                    if setting_type == IFptr.LIBFPTR_ST_NUMBER:
+                        setting_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SETTING_VALUE)
+                    elif setting_type == IFptr.LIBFPTR_ST_BOOL:
+                        setting_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_SETTING_VALUE)
+                    elif setting_type == IFptr.LIBFPTR_ST_STRING:
+                        setting_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_SETTING_VALUE)
+                    else:
+                        setting_value = None
+
+                    settings.append({
+                        "setting_id": setting_id,
+                        "setting_type": setting_type,
+                        "setting_name": setting_name,
+                        "setting_value": setting_value
+                    })
+
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                # Завершаем чтение
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                self._check_result(self.fptr.endReadRecords(), "завершения чтения настроек")
+
+                response['success'] = True
+                response['message'] = f"Прочитано настроек ККТ: {len(settings)}"
+                response['data'] = {"settings": settings}
+
+            elif command == 'read_last_document_journal':
+                # Читаем последний закрытый документ из электронного журнала
+                self._check_result(self.fptr.getLastDocumentJournal(), "чтения последнего документа из журнала")
+
+                # Получаем TLV-массив
+                tlv_list = self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TLV_LIST)
+
+                # Парсим TLV-структуры
+                tlv_structures = []
+                pos = 0
+                while pos < len(tlv_list):
+                    if pos + 4 > len(tlv_list):
+                        break
+
+                    # Читаем Tag (2 байта, LE)
+                    tag = tlv_list[pos] | (tlv_list[pos + 1] << 8)
+                    # Читаем Length (2 байта, LE)
+                    length = tlv_list[pos + 2] | (tlv_list[pos + 3] << 8)
+                    pos += 4
+
+                    # Читаем Value
+                    if pos + length > len(tlv_list):
+                        break
+
+                    value = list(tlv_list[pos:pos + length])
+                    pos += length
+
+                    tlv_structures.append({
+                        "tag": tag,
+                        "length": length,
+                        "value": value
+                    })
+
+                response['success'] = True
+                response['message'] = f"Последний документ из журнала успешно прочитан, TLV структур: {len(tlv_structures)}"
+                response['data'] = {
+                    "tlv_structures": tlv_structures,
+                    "raw_bytes": list(tlv_list)
+                }
+
             else:
                 response['message'] = f"Неизвестная команда: {command}"
 
