@@ -11,10 +11,44 @@ from logger import logger
 class CommandProcessor:
     """Процессор команд для ККТ с использованием паттерна инкапсуляции"""
 
-    def __init__(self):
+    def __init__(self, redis_client=None):
         """Инициализация процессора с драйвером ККТ"""
         self.driver = AtolDriver()
         self.fptr = self.driver.fptr
+        self.redis_client = redis_client
+
+    def _get_cashier(self, device_id: str, kwargs: dict) -> tuple[str, str]:
+        """
+        Получить данные кассира с приоритетом:
+        1. Из параметров запроса (kwargs)
+        2. Из Redis (динамически установленный)
+        3. Из настроек (settings)
+
+        Returns:
+            tuple[str, str]: (cashier_name, cashier_inn)
+        """
+        # Приоритет 1: из параметров запроса
+        if 'cashier_name' in kwargs:
+            cashier_name = kwargs.get('cashier_name')
+            cashier_inn = kwargs.get('cashier_inn', '')
+            if cashier_name:  # Если передано не пустое значение
+                return cashier_name, cashier_inn
+
+        # Приоритет 2: из Redis
+        if self.redis_client:
+            try:
+                cashier_key = f"cashier:{device_id}"
+                cashier_data = self.redis_client.hgetall(cashier_key)
+                if cashier_data:
+                    cashier_name = cashier_data.get(b"cashier_name", b"").decode('utf-8')
+                    cashier_inn = cashier_data.get(b"cashier_inn", b"").decode('utf-8')
+                    if cashier_name:
+                        return cashier_name, cashier_inn
+            except Exception as e:
+                logger.warning(f"Ошибка при получении кассира из Redis: {e}")
+
+        # Приоритет 3: из настроек
+        return settings.cashier_name, settings.cashier_inn
 
     def _check_result(self, result: int, operation: str):
         """Проверяет результат выполнения операции драйвера"""
@@ -145,6 +179,7 @@ class CommandProcessor:
         }
         command = command_data.get('command')
         kwargs = command_data.get('kwargs', {})
+        device_id = command_data.get('device_id', 'default')
 
         try:
             # ======================================================================
@@ -175,9 +210,9 @@ class CommandProcessor:
             # Shift Commands
             # ======================================================================
             elif command == 'shift_open':
-                # Регистрация кассира
-                self.fptr.setParam(1021, kwargs['cashier_name'])
-                cashier_inn = kwargs.get('cashier_inn', '')
+                # Получение кассира с приоритетом: kwargs -> Redis -> settings
+                cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
+                self.fptr.setParam(1021, cashier_name)
                 if cashier_inn:
                     self.fptr.setParam(1203, cashier_inn)
                 self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
@@ -192,9 +227,9 @@ class CommandProcessor:
                 response['data'] = {'shift_number': shift_number}
 
             elif command == 'shift_close':
-                # Регистрация кассира
-                self.fptr.setParam(1021, kwargs['cashier_name'])
-                cashier_inn = kwargs.get('cashier_inn', '')
+                # Получение кассира с приоритетом: kwargs -> Redis -> settings
+                cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
+                self.fptr.setParam(1021, cashier_name)
                 if cashier_inn:
                     self.fptr.setParam(1203, cashier_inn)
                 self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
@@ -212,8 +247,10 @@ class CommandProcessor:
                 response['message'] = "Смена успешно закрыта, Z-отчет напечатан"
 
             elif command == 'shift_get_status':
-                # Запрос состояния смены через get_shift_state
-                self._check_result(self.fptr.queryData(), "запроса данных")
+                # Запрос состояния смены
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_DATA_TYPE, IFptr.LIBFPTR_DT_SHIFT_STATE)
+                self._check_result(self.fptr.queryData(), "запроса состояния смены")
+                dt = self.fptr.getParamDateTime(IFptr.LIBFPTR_PARAM_DATE_TIME)
                 shift_state = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_STATE)
                 shift_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER)
 
@@ -228,14 +265,15 @@ class CommandProcessor:
                 response['data'] = {
                     "shift_state": shift_state,
                     "shift_state_name": shift_state_names.get(shift_state, f"Неизвестное состояние ({shift_state})"),
-                    "shift_number": shift_number
+                    "shift_number": shift_number,
+                    "date_time": dt.isoformat() if isinstance(dt, datetime.datetime) else None,
                 }
                 response['message'] = "Статус смены получен"
 
             elif command == 'shift_print_x_report':
-                # Регистрация кассира
-                self.fptr.setParam(1021, kwargs['cashier_name'])
-                cashier_inn = kwargs.get('cashier_inn', '')
+                # Получение кассира с приоритетом: kwargs -> Redis -> settings
+                cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
+                self.fptr.setParam(1021, cashier_name)
                 if cashier_inn:
                     self.fptr.setParam(1203, cashier_inn)
                 self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
@@ -251,9 +289,9 @@ class CommandProcessor:
             # Receipt Commands
             # ======================================================================
             elif command == 'receipt_open':
-                # Регистрация кассира
-                self.fptr.setParam(1021, kwargs['cashier_name'])
-                cashier_inn = kwargs.get('cashier_inn', '')
+                # Получение кассира с приоритетом: kwargs -> Redis -> settings
+                cashier_name, cashier_inn = self._get_cashier(device_id, kwargs)
+                self.fptr.setParam(1021, cashier_name)
                 if cashier_inn:
                     self.fptr.setParam(1203, cashier_inn)
                 self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
@@ -1379,10 +1417,10 @@ class DeviceWorker:
         logger.info(f"  - Канал команд: {self.command_channel}")
         logger.info(f"  - Канал ответов: {self.response_channel}")
 
-    def _get_processor(self):
+    def _get_processor(self, redis_client=None):
         """Получить или создать процессор команд (lazy initialization)"""
         if self.processor is None:
-            self.processor = CommandProcessor()
+            self.processor = CommandProcessor(redis_client=redis_client)
             logger.info(f"[{self.device_id}] Создан процессор команд")
         return self.processor
 
@@ -1396,8 +1434,8 @@ class DeviceWorker:
                 command_data = json.loads(message.get('data'))
                 logger.debug(f"[{self.device_id}] Получена команда: {command_data}")
 
-                # Используем lazy initialization для процессора
-                processor = self._get_processor()
+                # Используем lazy initialization для процессора, передаем redis клиент
+                processor = self._get_processor(redis_client=r)
                 response = processor.process_command(command_data)
                 r.publish(self.response_channel, json.dumps(response, ensure_ascii=False))
                 logger.debug(f"[{self.device_id}] Ответ отправлен: {response}")

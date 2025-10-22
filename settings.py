@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     company_inn: str = ""
     company_payment_address: str = ""
     company_email: str = ""
+
+    # Кассир по умолчанию
     cashier_name: str = "Кассир"
+    cashier_inn: str = ""
 
     # API сервер
     api_host: str = "0.0.0.0"
