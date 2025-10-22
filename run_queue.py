@@ -175,16 +175,35 @@ class CommandProcessor:
             # Shift Commands
             # ======================================================================
             elif command == 'shift_open':
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_OPERATOR_NAME, kwargs['cashier_name'])
+                # Регистрация кассира
+                self.fptr.setParam(1021, kwargs['cashier_name'])
+                cashier_inn = kwargs.get('cashier_inn', '')
+                if cashier_inn:
+                    self.fptr.setParam(1203, cashier_inn)
+                self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
+
+                # Открытие смены
                 self._check_result(self.fptr.openShift(), "открытия смены")
+                self._check_result(self.fptr.checkDocumentClosed(), "проверки закрытия документа")
+
                 shift_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER)
                 response['success'] = True
                 response['message'] = f"Смена #{shift_number} успешно открыта"
                 response['data'] = {'shift_number': shift_number}
 
             elif command == 'shift_close':
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_OPERATOR_NAME, kwargs['cashier_name'])
-                self._check_result(self.fptr.closeShift(), "закрытия смены")
+                # Регистрация кассира
+                self.fptr.setParam(1021, kwargs['cashier_name'])
+                cashier_inn = kwargs.get('cashier_inn', '')
+                if cashier_inn:
+                    self.fptr.setParam(1203, cashier_inn)
+                self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
+
+                # Закрытие смены через report()
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_REPORT_TYPE, IFptr.LIBFPTR_RT_CLOSE_SHIFT)
+                self._check_result(self.fptr.report(), "закрытия смены")
+                self._check_result(self.fptr.checkDocumentClosed(), "проверки закрытия документа")
+
                 response['success'] = True
                 response['data'] = {
                     "shift_number": self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER),
@@ -192,12 +211,55 @@ class CommandProcessor:
                 }
                 response['message'] = "Смена успешно закрыта, Z-отчет напечатан"
 
+            elif command == 'shift_get_status':
+                # Запрос состояния смены через get_shift_state
+                self._check_result(self.fptr.queryData(), "запроса данных")
+                shift_state = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_STATE)
+                shift_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER)
+
+                # Расшифровка состояния смены
+                shift_state_names = {
+                    0: "Смена закрыта",
+                    1: "Смена открыта",
+                    2: "Смена истекла (больше 24 часов)"
+                }
+
+                response['success'] = True
+                response['data'] = {
+                    "shift_state": shift_state,
+                    "shift_state_name": shift_state_names.get(shift_state, f"Неизвестное состояние ({shift_state})"),
+                    "shift_number": shift_number
+                }
+                response['message'] = "Статус смены получен"
+
+            elif command == 'shift_print_x_report':
+                # Регистрация кассира
+                self.fptr.setParam(1021, kwargs['cashier_name'])
+                cashier_inn = kwargs.get('cashier_inn', '')
+                if cashier_inn:
+                    self.fptr.setParam(1203, cashier_inn)
+                self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
+
+                # Печать X-отчета
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_REPORT_TYPE, IFptr.LIBFPTR_RT_X)
+                self._check_result(self.fptr.report(), "печати X-отчета")
+
+                response['success'] = True
+                response['message'] = "X-отчет успешно напечатан"
+
             # ======================================================================
             # Receipt Commands
             # ======================================================================
             elif command == 'receipt_open':
+                # Регистрация кассира
+                self.fptr.setParam(1021, kwargs['cashier_name'])
+                cashier_inn = kwargs.get('cashier_inn', '')
+                if cashier_inn:
+                    self.fptr.setParam(1203, cashier_inn)
+                self._check_result(self.fptr.operatorLogin(), "регистрации кассира")
+
+                # Открытие чека
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECEIPT_TYPE, kwargs['receipt_type'])
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_OPERATOR_NAME, kwargs['cashier_name'])
                 if kwargs.get('customer_contact'):
                     self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECEIPT_ELECTRONICALLY, True)
                     self.fptr.setParam(IFptr.LIBFPTR_PARAM_BUYER_EMAIL_OR_PHONE, kwargs['customer_contact'])
