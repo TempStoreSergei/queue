@@ -319,19 +319,15 @@ class CommandProcessor:
 
             elif command == 'receipt_add_payment':
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_TYPE, kwargs['payment_type'])
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_SUM, kwargs['amount'])
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_SUM, kwargs['sum'])
                 self._check_result(self.fptr.payment(), "регистрации оплаты")
                 response['success'] = True
-                response['message'] = f"Оплата {kwargs['amount']:.2f} добавлена"
+                response['message'] = f"Оплата {kwargs['sum']:.2f} добавлена"
 
             elif command == 'receipt_close':
                 self._check_result(self.fptr.closeReceipt(), "закрытия чека")
                 response['success'] = True
-                response['data'] = {
-                    "fiscal_document_number": self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FISCAL_DOCUMENT_NUMBER),
-                    "fiscal_document_sign": self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_FISCAL_DOCUMENT_SIGN),
-                    "shift_number": self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_SHIFT_NUMBER),
-                }
+                response['data'] = None
                 response['message'] = "Чек успешно закрыт и напечатан"
 
             elif command == 'receipt_cancel':
