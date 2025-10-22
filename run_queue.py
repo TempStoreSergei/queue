@@ -307,22 +307,60 @@ class CommandProcessor:
 
             elif command == 'registration':
                 for key, value in kwargs.items():
-                    if key == 'name': self.fptr.setParam(IFptr.LIBFPTR_PARAM_COMMODITY_NAME, value)
-                    elif key == 'price': self.fptr.setParam(IFptr.LIBFPTR_PARAM_PRICE, value)
-                    elif key == 'quantity': self.fptr.setParam(IFptr.LIBFPTR_PARAM_QUANTITY, value)
-                    elif key == 'tax_type': self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAX_TYPE, value)
-                    elif key == 'payment_method': self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_TYPE_SIGN, value)
-                    elif key == 'payment_object': self.fptr.setParam(IFptr.LIBFPTR_PARAM_COMMODITY_SIGN, value)
+                    if key == 'name':
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_COMMODITY_NAME, value)
+                    elif key == 'price':
+                        # Конвертируем копейки в рубли для драйвера
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_PRICE, value / 100.0)
+                    elif key == 'quantity':
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_QUANTITY, value)
+                    elif key == 'tax_type':
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAX_TYPE, value)
+                    elif key == 'tax_sum':
+                        # Конвертируем копейки в рубли для драйвера
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAX_SUM, value / 100.0)
+                    elif key == 'position_sum':
+                        # Конвертируем копейки в рубли для драйвера
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_POSITION_SUM, value / 100.0)
+                    elif key == 'info_discount_sum':
+                        # Конвертируем копейки в рубли для драйвера
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_INFO_DISCOUNT_SUM, value / 100.0)
+                    elif key == 'excise':
+                        # Конвертируем копейки в рубли для драйвера
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_EXCISE, value / 100.0)
+                    elif key == 'payment_method_type':
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_TYPE_SIGN, value)
+                    elif key == 'payment_object_type':
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_COMMODITY_SIGN, value)
                 self._check_result(self.fptr.registration(), "регистрации позиции")
                 response['success'] = True
                 response['message'] = f"Позиция '{kwargs['name']}' добавлена"
 
             elif command == 'payment':
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_TYPE, kwargs['payment_type'])
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_SUM, kwargs['sum'])
+                # Конвертируем копейки в рубли для драйвера
+                sum_rubles = kwargs['sum'] / 100.0
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_PAYMENT_SUM, sum_rubles)
                 self._check_result(self.fptr.payment(), "регистрации оплаты")
                 response['success'] = True
-                response['message'] = f"Оплата {kwargs['sum']:.2f} добавлена"
+                response['message'] = f"Оплата {kwargs['sum']} копеек ({sum_rubles:.2f} руб.) добавлена"
+
+            elif command == 'receipt_tax':
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAX_TYPE, kwargs['tax_type'])
+                # Конвертируем копейки в рубли для драйвера
+                tax_sum_rubles = kwargs['tax_sum'] / 100.0
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAX_SUM, tax_sum_rubles)
+                self._check_result(self.fptr.receiptTax(), "регистрации налога на чек")
+                response['success'] = True
+                response['message'] = f"Налог {kwargs['tax_sum']} копеек ({tax_sum_rubles:.2f} руб.) добавлен"
+
+            elif command == 'receipt_total':
+                # Конвертируем копейки в рубли для драйвера
+                sum_rubles = kwargs['sum'] / 100.0
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_SUM, sum_rubles)
+                self._check_result(self.fptr.receiptTotal(), "регистрации итога чека")
+                response['success'] = True
+                response['message'] = f"Итог чека {kwargs['sum']} копеек ({sum_rubles:.2f} руб.) зарегистрирован"
 
             elif command == 'close_receipt':
                 self._check_result(self.fptr.closeReceipt(), "закрытия чека")
@@ -354,16 +392,20 @@ class CommandProcessor:
             # Cash Commands
             # ======================================================================
             elif command == 'cash_income':
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_SUM, kwargs['amount'])
+                # Конвертируем копейки в рубли для драйвера
+                amount_rubles = kwargs['amount'] / 100.0
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_SUM, amount_rubles)
                 self._check_result(self.fptr.cashIncome(), "внесения наличных")
                 response['success'] = True
-                response['message'] = f"Внесено наличных: {kwargs['amount']:.2f}"
+                response['message'] = f"Внесено наличных: {kwargs['amount']} копеек ({amount_rubles:.2f} руб.)"
 
             elif command == 'cash_outcome':
-                self.fptr.setParam(IFptr.LIBFPTR_PARAM_SUM, kwargs['amount'])
+                # Конвертируем копейки в рубли для драйвера
+                amount_rubles = kwargs['amount'] / 100.0
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_SUM, amount_rubles)
                 self._check_result(self.fptr.cashOutcome(), "выплаты наличных")
                 response['success'] = True
-                response['message'] = f"Выплачено наличных: {kwargs['amount']:.2f}"
+                response['message'] = f"Выплачено наличных: {kwargs['amount']} копеек ({amount_rubles:.2f} руб.)"
 
             # ======================================================================
             # Print Commands
