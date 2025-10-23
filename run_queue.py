@@ -124,21 +124,8 @@ class CommandProcessor:
         else:
             # Обычный реквизит - декодируем значение
             try:
-                if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
-                    tag_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
-                    record["tag_value"] = tag_value
-                elif tag_type == 3:  # FVLN (float)
-                    # Для float используем стандартное преобразование
-                    import struct
-                    if len(tag_value_raw) == 4:
-                        tag_value = struct.unpack('<f', tag_value_raw)[0]
-                    elif len(tag_value_raw) == 8:
-                        tag_value = struct.unpack('<d', tag_value_raw)[0]
-                    else:
-                        tag_value = float(int.from_bytes(tag_value_raw, byteorder='little', signed=False))
-                    record["tag_value"] = tag_value
-                elif tag_type == 8:  # STRING
-                    # Пробуем разные кодировки
+                if tag_type == 1:  # STRING (тип 1)
+                    # Пробуем разные кодировки для строк
                     try:
                         tag_value = tag_value_raw.decode('cp866').strip()
                     except:
@@ -147,6 +134,18 @@ class CommandProcessor:
                         except:
                             tag_value = tag_value_raw.decode('ascii', errors='replace').strip()
                     record["tag_value"] = tag_value
+                elif tag_type in [5, 6, 7, 8]:  # BYTE, VLN, UINT_16, UINT_32
+                    tag_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                    record["tag_value"] = tag_value
+                elif tag_type == 3:  # FVLN (дробное число с переменной длиной)
+                    # FVLN представляет число как VLN с фиксированной точностью (обычно 2 знака)
+                    # Читаем как целое число и делим на 100
+                    try:
+                        raw_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                        tag_value = raw_value / 100.0
+                        record["tag_value"] = tag_value
+                    except:
+                        record["tag_value"] = list(tag_value_raw)
                 elif tag_type == 10:  # BOOL
                     tag_value = bool(int.from_bytes(tag_value_raw, byteorder='little', signed=False))
                     record["tag_value"] = tag_value
@@ -155,7 +154,12 @@ class CommandProcessor:
                     dt = datetime.datetime.fromtimestamp(timestamp)
                     record["tag_value"] = timestamp
                     record["tag_value_datetime"] = dt.isoformat()
-                else:  # STLV, ARRAY, BITS и др.
+                elif tag_type == 4:  # BITS (битовая маска)
+                    # Для битовых масок показываем как число
+                    tag_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                    record["tag_value"] = tag_value
+                    record["tag_value_hex"] = tag_value_raw.hex()
+                else:  # STLV (0), ARRAY (2) и другие
                     record["tag_value"] = list(tag_value_raw)
 
                 # Сохраняем сырые байты для всех типов
@@ -163,6 +167,7 @@ class CommandProcessor:
             except Exception as e:
                 logger.warning(f"Ошибка при декодировании значения реквизита {tag_number}: {e}")
                 record["tag_value"] = list(tag_value_raw)
+                record["tag_value_raw"] = list(tag_value_raw)
 
         return record
 
