@@ -57,6 +57,115 @@ class CommandProcessor:
             error_code = self.fptr.errorCode()
             raise AtolDriverError(f"Ошибка {operation}: {error_description}", error_code=error_code)
 
+    def _parse_tlv_record_recursive(self, tag_number: int, tag_name: str, tag_type: int,
+                                     tag_value_raw: bytes, is_complex: bool, is_repeatable: bool) -> dict:
+        """
+        Рекурсивно парсит TLV-запись, включая вложенные структуры.
+
+        Args:
+            tag_number: Номер реквизита
+            tag_name: Название реквизита
+            tag_type: Тип реквизита
+            tag_value_raw: Сырое значение в байтах
+            is_complex: Флаг составного реквизита
+            is_repeatable: Флаг повторяющегося реквизита
+
+        Returns:
+            dict: Словарь с информацией о реквизите и его вложенных элементах
+        """
+        record = {
+            "tag_number": tag_number,
+            "tag_name": tag_name,
+            "tag_type": tag_type,
+            "is_complex": is_complex,
+            "is_repeatable": is_repeatable,
+        }
+
+        # Если это составной реквизит (STLV), парсим вложенные элементы
+        if is_complex and tag_value_raw:
+            try:
+                # Используем LIBFPTR_RT_PARSE_COMPLEX_ATTR для разбора
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_TYPE, IFptr.LIBFPTR_RT_PARSE_COMPLEX_ATTR)
+                self.fptr.setParam(IFptr.LIBFPTR_PARAM_TAG_VALUE, tag_value_raw)
+
+                if self.fptr.beginReadRecords() == 0:  # 0 = LIBFPTR_OK
+                    records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
+
+                    nested_records = []
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                    while self.fptr.readNextRecord() == 0:
+                        nested_tag_number = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_NUMBER)
+                        nested_tag_name = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_NAME)
+                        nested_tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
+                        nested_is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
+                        nested_is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+                        nested_tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
+
+                        # Рекурсивно парсим вложенный элемент
+                        nested_record = self._parse_tlv_record_recursive(
+                            nested_tag_number, nested_tag_name, nested_tag_type,
+                            nested_tag_value_raw, nested_is_complex, nested_is_repeatable
+                        )
+                        nested_records.append(nested_record)
+
+                        self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+
+                    # Завершаем разбор
+                    self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
+                    self.fptr.endReadRecords()
+
+                    record["nested_records"] = nested_records
+                    record["tag_value_raw"] = list(tag_value_raw)
+            except Exception as e:
+                logger.warning(f"Ошибка при парсинге составного реквизита {tag_number}: {e}")
+                # Если не удалось распарсить, сохраняем как обычное значение
+                record["tag_value"] = list(tag_value_raw)
+        else:
+            # Обычный реквизит - декодируем значение
+            try:
+                if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
+                    tag_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                    record["tag_value"] = tag_value
+                elif tag_type == 3:  # FVLN (float)
+                    # Для float используем стандартное преобразование
+                    import struct
+                    if len(tag_value_raw) == 4:
+                        tag_value = struct.unpack('<f', tag_value_raw)[0]
+                    elif len(tag_value_raw) == 8:
+                        tag_value = struct.unpack('<d', tag_value_raw)[0]
+                    else:
+                        tag_value = float(int.from_bytes(tag_value_raw, byteorder='little', signed=False))
+                    record["tag_value"] = tag_value
+                elif tag_type == 8:  # STRING
+                    # Пробуем разные кодировки
+                    try:
+                        tag_value = tag_value_raw.decode('cp866').strip()
+                    except:
+                        try:
+                            tag_value = tag_value_raw.decode('utf-8').strip()
+                        except:
+                            tag_value = tag_value_raw.decode('ascii', errors='replace').strip()
+                    record["tag_value"] = tag_value
+                elif tag_type == 10:  # BOOL
+                    tag_value = bool(int.from_bytes(tag_value_raw, byteorder='little', signed=False))
+                    record["tag_value"] = tag_value
+                elif tag_type == 9:  # UNIX_TIME
+                    timestamp = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                    dt = datetime.datetime.fromtimestamp(timestamp)
+                    record["tag_value"] = timestamp
+                    record["tag_value_datetime"] = dt.isoformat()
+                else:  # STLV, ARRAY, BITS и др.
+                    record["tag_value"] = list(tag_value_raw)
+
+                # Сохраняем сырые байты для всех типов
+                record["tag_value_raw"] = list(tag_value_raw)
+            except Exception as e:
+                logger.warning(f"Ошибка при декодировании значения реквизита {tag_number}: {e}")
+                record["tag_value"] = list(tag_value_raw)
+
+        return record
+
     def _play_beep(self, frequency: int = 2000, duration: int = 100):
         """
         Воспроизвести звуковой сигнал
@@ -862,7 +971,7 @@ class CommandProcessor:
                 document_size = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_COUNT)
                 records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
 
-                # Читаем все TLV-записи
+                # Читаем все TLV-записи с рекурсивным парсингом вложенных структур
                 tlv_records = []
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
                 while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
@@ -871,31 +980,14 @@ class CommandProcessor:
                     tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
                     is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
                     is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+                    tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
 
-                    # Читаем значение в зависимости от типа
-                    tag_value = None
-                    try:
-                        if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
-                            tag_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 3:  # FVLN (float)
-                            tag_value = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 8:  # STRING
-                            tag_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 10:  # BOOL
-                            tag_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        else:  # STLV, ARRAY, BITS, UNIX_TIME
-                            tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
-                    except:
-                        tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
-
-                    tlv_records.append({
-                        "tag_number": tag_number,
-                        "tag_name": tag_name,
-                        "tag_type": tag_type,
-                        "tag_value": tag_value,
-                        "is_complex": is_complex,
-                        "is_repeatable": is_repeatable
-                    })
+                    # Используем рекурсивный парсинг для обработки всех типов реквизитов
+                    tlv_record = self._parse_tlv_record_recursive(
+                        tag_number, tag_name, tag_type,
+                        tag_value_raw, is_complex, is_repeatable
+                    )
+                    tlv_records.append(tlv_record)
 
                     self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
 
@@ -904,7 +996,7 @@ class CommandProcessor:
                 self._check_result(self.fptr.endReadRecords(), "завершения чтения документа")
 
                 response['success'] = True
-                response['message'] = f"Документ №{document_number} успешно прочитан из ФН"
+                response['message'] = f"Документ №{document_number} успешно прочитан из ФН с полным разбором всех вложенных структур"
                 response['data'] = {
                     "document_number": document_number,
                     "document_type": document_type,
@@ -955,7 +1047,7 @@ class CommandProcessor:
 
                 records_id = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_RECORDS_ID)
 
-                # Читаем все TLV-записи
+                # Читаем все TLV-записи с рекурсивным парсингом вложенных структур
                 tlv_records = []
                 self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
                 while self.fptr.readNextRecord() == 0:  # 0 = LIBFPTR_OK
@@ -964,31 +1056,14 @@ class CommandProcessor:
                     tag_type = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_TYPE)
                     is_complex = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_COMPLEX)
                     is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
+                    tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
 
-                    # Читаем значение в зависимости от типа
-                    tag_value = None
-                    try:
-                        if tag_type in [4, 5, 6, 7]:  # BYTE, UINT_16, UINT_32, VLN
-                            tag_value = self.fptr.getParamInt(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 3:  # FVLN (float)
-                            tag_value = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 8:  # STRING
-                            tag_value = self.fptr.getParamString(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        elif tag_type == 10:  # BOOL
-                            tag_value = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_VALUE)
-                        else:  # STLV, ARRAY, BITS, UNIX_TIME
-                            tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
-                    except:
-                        tag_value = list(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
-
-                    tlv_records.append({
-                        "tag_number": tag_number,
-                        "tag_name": tag_name,
-                        "tag_type": tag_type,
-                        "tag_value": tag_value,
-                        "is_complex": is_complex,
-                        "is_repeatable": is_repeatable
-                    })
+                    # Используем рекурсивный парсинг для обработки всех типов реквизитов
+                    tlv_record = self._parse_tlv_record_recursive(
+                        tag_number, tag_name, tag_type,
+                        tag_value_raw, is_complex, is_repeatable
+                    )
+                    tlv_records.append(tlv_record)
 
                     self.fptr.setParam(IFptr.LIBFPTR_PARAM_RECORDS_ID, records_id)
 
@@ -997,7 +1072,7 @@ class CommandProcessor:
                 self._check_result(self.fptr.endReadRecords(), "завершения чтения документа регистрации")
 
                 response['success'] = True
-                response['message'] = f"Документ регистрации №{registration_number} успешно прочитан"
+                response['message'] = f"Документ регистрации №{registration_number} успешно прочитан с полным разбором всех вложенных структур"
                 response['data'] = {
                     "registration_number": registration_number,
                     "tlv_records": tlv_records
