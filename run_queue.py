@@ -58,7 +58,8 @@ class CommandProcessor:
             raise AtolDriverError(f"Ошибка {operation}: {error_description}", error_code=error_code)
 
     def _parse_tlv_record_recursive(self, tag_number: int, tag_name: str, tag_type: int,
-                                     tag_value_raw: bytes, is_complex: bool, is_repeatable: bool) -> dict:
+                                     tag_value_raw: bytes, is_complex: bool, is_repeatable: bool,
+                                     tag_value_from_driver=None) -> dict:
         """
         Рекурсивно парсит TLV-запись, включая вложенные структуры.
 
@@ -102,10 +103,19 @@ class CommandProcessor:
                         nested_is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
                         nested_tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
 
+                        # Для FVLN (тип 3) читаем значение через getParamDouble()
+                        nested_tag_value_from_driver = None
+                        if nested_tag_type == 3:  # FVLN
+                            try:
+                                nested_tag_value_from_driver = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                            except:
+                                pass
+
                         # Рекурсивно парсим вложенный элемент
                         nested_record = self._parse_tlv_record_recursive(
                             nested_tag_number, nested_tag_name, nested_tag_type,
-                            nested_tag_value_raw, nested_is_complex, nested_is_repeatable
+                            nested_tag_value_raw, nested_is_complex, nested_is_repeatable,
+                            nested_tag_value_from_driver
                         )
                         nested_records.append(nested_record)
 
@@ -124,7 +134,16 @@ class CommandProcessor:
         else:
             # Обычный реквизит - декодируем значение
             try:
-                if tag_type == 1:  # STRING (тип 1)
+                if tag_type == 3:  # FVLN (дробное число с переменной длиной)
+                    # Для FVLN используем значение, прочитанное драйвером через getParamDouble()
+                    if tag_value_from_driver is not None:
+                        record["tag_value"] = tag_value_from_driver
+                    else:
+                        # Если не передано, пытаемся декодировать вручную (делим на 1000)
+                        raw_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
+                        tag_value = raw_value / 1000.0
+                        record["tag_value"] = tag_value
+                elif tag_type == 1:  # STRING (тип 1)
                     # Пробуем разные кодировки для строк
                     try:
                         tag_value = tag_value_raw.decode('cp866').strip()
@@ -137,15 +156,6 @@ class CommandProcessor:
                 elif tag_type in [5, 6, 7, 8]:  # BYTE, VLN, UINT_16, UINT_32
                     tag_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
                     record["tag_value"] = tag_value
-                elif tag_type == 3:  # FVLN (дробное число с переменной длиной)
-                    # FVLN представляет число как VLN с фиксированной точностью (обычно 2 знака)
-                    # Читаем как целое число и делим на 100
-                    try:
-                        raw_value = int.from_bytes(tag_value_raw, byteorder='little', signed=False)
-                        tag_value = raw_value / 100.0
-                        record["tag_value"] = tag_value
-                    except:
-                        record["tag_value"] = list(tag_value_raw)
                 elif tag_type == 10:  # BOOL
                     tag_value = bool(int.from_bytes(tag_value_raw, byteorder='little', signed=False))
                     record["tag_value"] = tag_value
@@ -987,10 +997,19 @@ class CommandProcessor:
                     is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
                     tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
 
+                    # Для FVLN (тип 3) читаем значение через getParamDouble()
+                    tag_value_from_driver = None
+                    if tag_type == 3:  # FVLN
+                        try:
+                            tag_value_from_driver = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        except:
+                            pass
+
                     # Используем рекурсивный парсинг для обработки всех типов реквизитов
                     tlv_record = self._parse_tlv_record_recursive(
                         tag_number, tag_name, tag_type,
-                        tag_value_raw, is_complex, is_repeatable
+                        tag_value_raw, is_complex, is_repeatable,
+                        tag_value_from_driver
                     )
                     tlv_records.append(tlv_record)
 
@@ -1063,10 +1082,19 @@ class CommandProcessor:
                     is_repeatable = self.fptr.getParamBool(IFptr.LIBFPTR_PARAM_TAG_IS_REPEATABLE)
                     tag_value_raw = bytes(self.fptr.getParamByteArray(IFptr.LIBFPTR_PARAM_TAG_VALUE))
 
+                    # Для FVLN (тип 3) читаем значение через getParamDouble()
+                    tag_value_from_driver = None
+                    if tag_type == 3:  # FVLN
+                        try:
+                            tag_value_from_driver = self.fptr.getParamDouble(IFptr.LIBFPTR_PARAM_TAG_VALUE)
+                        except:
+                            pass
+
                     # Используем рекурсивный парсинг для обработки всех типов реквизитов
                     tlv_record = self._parse_tlv_record_recursive(
                         tag_number, tag_name, tag_type,
-                        tag_value_raw, is_complex, is_repeatable
+                        tag_value_raw, is_complex, is_repeatable,
+                        tag_value_from_driver
                     )
                     tlv_records.append(tlv_record)
 
